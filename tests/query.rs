@@ -85,6 +85,43 @@ mod tests {
         }
     }
 
+    // Run queries against both a COITree and by brute force and check that
+    // they get the same results.
+    fn check_queries_fallible<I>(
+        a: &COITree<u32, I>,
+        b: &[Interval<u32>],
+        queries: &mut [(i32, i32)],
+    ) where
+        I: IntWithMax,
+    {
+        let mut a_hits: Vec<u32> = Vec::new();
+        let mut b_hits: Vec<u32> = Vec::new();
+
+        for (query_first, query_last) in queries {
+            a_hits.clear();
+            b_hits.clear();
+
+            a.query_fallible(*query_first, *query_last, |node| {
+                // impossible to fail
+                if <coitrees::Interval<&u32> as coitrees::GenericInterval<u32>>::first(node) < 0 {
+                    return Err(std::io::Error::other("oh no!"));
+                }
+                a_hits.push(node.metadata.clone());
+                Ok(())
+            })
+            .unwrap();
+
+            brute_force_query(b, *query_first, *query_last, |node| {
+                b_hits.push(node.metadata)
+            });
+
+            a_hits.sort();
+            b_hits.sort();
+
+            assert_eq!(a_hits, b_hits);
+        }
+    }
+
     fn check_coverage<I>(a: &COITree<u32, I>, b: &[Interval<u32>], queries: &mut [(i32, i32)])
     where
         I: IntWithMax,
@@ -245,8 +282,9 @@ mod tests {
         );
     }
 
-    const CHECKS: [fn(&COITree<u32, usize>, &[Interval<u32>], &mut [(i32, i32)]); 4] = [
+    const CHECKS: [fn(&COITree<u32, usize>, &[Interval<u32>], &mut [(i32, i32)]); 5] = [
         check_queries,
+        check_queries_fallible,
         check_count_queries,
         check_sorted_querent_queries,
         check_sorted_querent_unsorted_queries,
