@@ -201,6 +201,17 @@ where
         }
     }
 
+    /// Find intervals in the set overlaping the query `[first, last]` and call `visit` on every overlapping node.
+    fn query_fallible<F, E>(&'a self, first: i32, last: i32, mut visit: F) -> Result<(), E>
+    where
+        F: FnMut(&IntervalNode<T, I>) -> Result<(), E>,
+    {
+        if !self.is_empty() {
+            query_recursion_fallible(&self.nodes, self.root_idx, first, last, &mut visit)?;
+        }
+        Ok(())
+    }
+
     /// Count the number of intervals in the set overlapping the query `[first, last]`.
     fn query_count(&self, first: i32, last: i32) -> usize {
         if !self.is_empty() {
@@ -381,6 +392,53 @@ fn query_recursion<'a, T, I, F>(
             }
         }
     }
+}
+
+// Recursively count overlaps between the tree specified by `nodes` and a
+// query interval specified by `first`, `last`.
+fn query_recursion_fallible<'a, T, I, F, E>(
+    nodes: &'a [IntervalNode<T, I>],
+    root_idx: usize,
+    first: i32,
+    last: i32,
+    visit: &mut F,
+) -> Result<(), E>
+where
+    T: Clone,
+    I: IntWithMax,
+    F: FnMut(&'a IntervalNode<T, I>) -> Result<(), E>,
+{
+    let node = &nodes[root_idx];
+
+    if node.left == node.right {
+        // simple subtree
+        for node in &nodes[root_idx..root_idx + node.right.to_usize()] {
+            if last < node.first {
+                break;
+            } else if first <= node.last {
+                visit(node)?;
+            }
+        }
+    } else {
+        if overlaps(node.first, node.last, first, last) {
+            visit(node)?;
+        }
+
+        if node.left < I::MAX {
+            let left = node.left.to_usize();
+            if nodes[left].subtree_last >= first {
+                query_recursion_fallible(nodes, left, first, last, visit)?;
+            }
+        }
+
+        if node.right < I::MAX {
+            let right = node.right.to_usize();
+            if overlaps(node.first, nodes[right].subtree_last, first, last) {
+                query_recursion_fallible(nodes, right, first, last, visit)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 // query_recursion but just count number of overlaps

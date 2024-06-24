@@ -224,6 +224,56 @@ where
         }
     }
 
+    fn query_chunk_metadata_fallible<'a, F, E>(
+        &'a self,
+        query_first: i32x4,
+        query_last: i32x4,
+        mut visit: F,
+    ) -> Result<(), E>
+    where
+        F: FnMut(i32, i32, &'a T) -> Result<(), E>,
+        E: std::error::Error,
+    {
+        let cmp: u64 = unsafe {
+            let cmp1 = vcgtq_s32(query_last, self.firsts);
+            let cmp2 = vcgtq_s32(self.lasts, query_first);
+            let cmp = vmovn_u32(vandq_u32(cmp1, cmp2));
+            transmute(cmp)
+        };
+
+        let masks = [0xffff, 0xffff << 16, 0xffff << 32, 0xffff << 48];
+
+        if cmp & masks[0] != 0 {
+            visit(
+                unsafe { vgetq_lane_s32(self.firsts, 0) + 1 },
+                unsafe { vgetq_lane_s32(self.lasts, 0) - 1 },
+                &self.metadata[0],
+            )?;
+        }
+        if cmp & masks[1] != 0 {
+            visit(
+                unsafe { vgetq_lane_s32(self.firsts, 1) + 1 },
+                unsafe { vgetq_lane_s32(self.lasts, 1) - 1 },
+                &self.metadata[1],
+            )?;
+        }
+        if cmp & masks[2] != 0 {
+            visit(
+                unsafe { vgetq_lane_s32(self.firsts, 2) + 1 },
+                unsafe { vgetq_lane_s32(self.lasts, 2) - 1 },
+                &self.metadata[2],
+            )?;
+        }
+        if cmp & masks[3] != 0 {
+            visit(
+                unsafe { vgetq_lane_s32(self.firsts, 3) + 1 },
+                unsafe { vgetq_lane_s32(self.lasts, 3) - 1 },
+                &self.metadata[3],
+            )?;
+        }
+        Ok(())
+    }
+
     fn query_chunk<F>(&self, query_first: i32x4, query_last: i32x4, mut visit: F)
     where
         F: FnMut(i32, i32),
@@ -400,6 +450,28 @@ where
                 &mut visit,
             );
         }
+    }
+
+    // /// Find intervals in the set overlaping the query `[first, last]` and call `visit` on every overlapping node
+    fn query_fallible<F, E>(&'a self, first: i32, last: i32, mut visit: F) -> Result<(), E>
+    where
+        F: FnMut(&Interval<&'a T>) -> Result<(), E>,
+        E: std::error::Error,
+    {
+        let (firstv, lastv) = unsafe { (vdupq_n_s32(first), vdupq_n_s32(last)) };
+
+        if !self.is_empty() {
+            query_recursion_fallible(
+                &self.nodes,
+                self.root_idx,
+                first,
+                last,
+                firstv,
+                lastv,
+                &mut visit,
+            )?;
+        }
+        Ok(())
     }
 
     /// Count the number of intervals in the set overlapping the query `[first, last]`.
@@ -626,6 +698,66 @@ fn query_recursion<'a, T, I, F>(
             }
         }
     }
+}
+
+// // Recursively count overlaps between the tree specified by `nodes` and a
+// // query interval specified by `first`, `last`.
+fn query_recursion_fallible<'a, T, I, F, E>(
+    nodes: &'a [IntervalNode<T, I>],
+    root_idx: usize,
+    first: i32,
+    last: i32,
+    firstv: i32x4,
+    lastv: i32x4,
+    visit: &mut F,
+) -> Result<(), E>
+where
+    T: Clone,
+    I: IntWithMax,
+    F: FnMut(&Interval<&'a T>) -> Result<(), E>,
+    E: std::error::Error,
+{
+    let node = &nodes[root_idx];
+
+    if node.left == node.right {
+        // simple subtree
+        for node in &nodes[root_idx..root_idx + node.right.to_usize()] {
+            if last < node.min_first() {
+                break;
+            }
+
+            node.query_chunk_metadata_fallible(firstv, lastv, |first_hit, last_hit, metadata| {
+                visit(&Interval {
+                    first: first_hit,
+                    last: last_hit,
+                    metadata,
+                })
+            })?;
+        }
+    } else {
+        node.query_chunk_metadata_fallible(firstv, lastv, |first_hit, last_hit, metadata| {
+            visit(&Interval {
+                first: first_hit,
+                last: last_hit,
+                metadata,
+            })
+        })?;
+
+        if node.left < I::MAX {
+            let left = node.left.to_usize();
+            if nodes[left].subtree_last >= first {
+                query_recursion_fallible(nodes, left, first, last, firstv, lastv, visit)?;
+            }
+        }
+
+        if node.right < I::MAX {
+            let right = node.right.to_usize();
+            if overlaps(node.min_first(), nodes[right].subtree_last, first, last) {
+                query_recursion_fallible(nodes, right, first, last, firstv, lastv, visit)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 // query_recursion but just count number of overlaps
