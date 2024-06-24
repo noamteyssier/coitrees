@@ -232,7 +232,6 @@ where
     ) -> Result<(), E>
     where
         F: FnMut(i32, i32, &'a T) -> Result<(), E>,
-        E: std::error::Error,
     {
         let cmp: u64 = unsafe {
             let cmp1 = vcgtq_s32(query_last, self.firsts);
@@ -456,7 +455,6 @@ where
     fn query_fallible<F, E>(&'a self, first: i32, last: i32, mut visit: F) -> Result<(), E>
     where
         F: FnMut(&Interval<&'a T>) -> Result<(), E>,
-        E: std::error::Error,
     {
         let (firstv, lastv) = unsafe { (vdupq_n_s32(first), vdupq_n_s32(last)) };
 
@@ -715,7 +713,6 @@ where
     T: Clone,
     I: IntWithMax,
     F: FnMut(&Interval<&'a T>) -> Result<(), E>,
-    E: std::error::Error,
 {
     let node = &nodes[root_idx];
 

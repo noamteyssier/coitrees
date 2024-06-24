@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::iter::IntoIterator;
 use std::ops::{AddAssign, SubAssign};
 
@@ -184,8 +183,7 @@ pub trait IntervalTree<'a> {
 
     fn query_fallible<F, E>(&'a self, first: i32, last: i32, visit: F) -> Result<(), E>
     where
-        F: FnMut(&Self::Item) -> Result<(), E>,
-        E: Error;
+        F: FnMut(&Self::Item) -> Result<(), E>;
 
     fn query_count(&self, first: i32, last: i32) -> usize;
     fn coverage(&self, first: i32, last: i32) -> (usize, usize);
